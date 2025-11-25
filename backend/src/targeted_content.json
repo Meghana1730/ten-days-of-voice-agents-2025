@@ -1,0 +1,26 @@
+[
+  {
+    "id": "ancient_civilizations",
+    "title": "Ancient Civilizations",
+    "summary": "Ancient civilizations like Egypt, Mesopotamia, China, and the Indus Valley laid the foundations for writing, architecture, agriculture, and governance.",
+    "sample_question": "What key features helped ancient civilizations grow and develop?"
+  },
+  {
+    "id": "medieval_india",
+    "title": "Medieval India",
+    "summary": "Medieval India saw powerful kingdoms like the Delhi Sultanate and the Mughal Empire, known for their culture, architecture, and administrative systems.",
+    "sample_question": "What were the major achievements of the Mughal Empire?"
+  },
+  {
+    "id": "renaissance",
+    "title": "Renaissance",
+    "summary": "The Renaissance was a cultural and intellectual revival in Europe that emphasized art, science, and humanism, transforming society.",
+    "sample_question": "Why is the Renaissance considered a rebirth of learning?"
+  },
+  {
+    "id": "world_war_2",
+    "title": "World War II",
+    "summary": "World War II was a global conflict from 1939 to 1945 involving major world powers, resulting in massive political and social changes.",
+    "sample_question": "What were the main causes of World War II?"
+  }
+]
