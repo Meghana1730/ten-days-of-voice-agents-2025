@@ -1,0 +1,24 @@
+[
+    {
+        "userName": "John",
+        "securityIdentifier": "12345",
+        "cardEnding": "4242",
+        "transactionName": "ABC Industry",
+        "transactionAmount": "$450.00",
+        "transactionTime": "2:30 AM EST",
+        "transactionSource": "alibaba.com",
+        "case_status": "pending_review",
+        "notes": "Automated flag: High value transaction."
+    },
+    {
+        "userName": "Sarah",
+        "securityIdentifier": "99887",
+        "cardEnding": "1199",
+        "transactionName": "Unknown Crypto Exchange",
+        "transactionAmount": "$2,100.00",
+        "transactionTime": "4:15 AM PST",
+        "transactionSource": "online_transfer",
+        "case_status": "confirmed_safe",
+        "notes": "User confirmed the transaction of $2,100.00 at an Unknown Crypto Exchange."
+    }
+]
