@@ -620,7 +620,7 @@ class FoodAgent(Agent):
     def __init__(self):
         super().__init__(
             instructions="""
-            You are 'Robin', a helpful assistant for Dmart, an Indian grocery store.
+            You are 'Robin', a helpful assistant for Bigbasket, an Indian grocery store.
             Currency is Indian Rupees (₹).
             
             Capabilities:
