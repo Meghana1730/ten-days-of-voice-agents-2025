@@ -1,163 +1,291 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Monitor, Moon, Sun } from '@phosphor-icons/react';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Track } from 'livekit-client';
+import { AnimatePresence, motion } from 'motion/react';
+import {
+  type TrackReference,
+  VideoTrack,
+  useLocalParticipant,
+  useTracks,
+  useVoiceAssistant,
+} from '@livekit/components-react';
 import { cn } from '@/lib/utils';
 
-// Constants
-const THEME_STORAGE_KEY = 'theme-preference';
-const THEME_MEDIA_QUERY = '(prefers-color-scheme: dark)';
+const MotionContainer = motion.create('div');
 
-// Minified script to prevent FOUC (Flash of Unstyled Content)
-const THEME_SCRIPT = `
-  (function() {
-    try {
-      const doc = document.documentElement;
-      const localTheme = localStorage.getItem("${THEME_STORAGE_KEY}");
-      const systemTheme = window.matchMedia("${THEME_MEDIA_QUERY}").matches ? "dark" : "light";
-      
-      doc.classList.remove("light", "dark");
-      
-      if (localTheme === "dark" || (!localTheme && systemTheme === "dark") || (localTheme === "system" && systemTheme === "dark")) {
-        doc.classList.add("dark");
-      } else {
-        doc.classList.add("light");
-      }
-    } catch (e) {}
-  })();
-`
-  .replace(/\n/g, '')
-  .replace(/\s+/g, ' ');
+const ANIMATION_TRANSITION = {
+  type: 'spring',
+  stiffness: 800,
+  damping: 50,
+  mass: 1,
+};
 
-export type ThemeMode = 'dark' | 'light' | 'system';
+const classNames = {
+  grid: [
+    'h-full w-full',
+    'grid gap-x-4 place-content-center',
+    'grid-cols-[1fr_1fr] grid-rows-[60px_1fr_60px]',
+  ],
+  agentChatOpenWithSecondTile: ['col-start-1 row-start-1', 'self-center justify-self-end'],
+  agentChatOpenWithoutSecondTile: ['col-start-1 row-start-1', 'col-span-2', 'place-content-center'],
+  agentChatClosed: ['col-start-1 row-start-1', 'col-span-2 row-span-3', 'place-content-center'],
+  secondTileChatOpen: ['col-start-2 row-start-1', 'self-center justify-self-start'],
+  secondTileChatClosed: ['col-start-2 row-start-3', 'place-content-end'],
+};
 
-export function ApplyThemeScript() {
-  return (
-    <script
-      id="theme-script"
-      dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }}
-    />
+export function useLocalTrackRef(source: Track.Source) {
+  const { localParticipant } = useLocalParticipant();
+  const publication = localParticipant.getTrackPublication(source);
+  const trackRef = useMemo<TrackReference | undefined>(
+    () => (publication ? { source, participant: localParticipant, publication } : undefined),
+    [source, publication, localParticipant]
   );
+  return trackRef;
 }
 
-interface ThemeToggleProps {
+/**
+ * Custom ECG/Oscilloscope Visualizer
+ * Renders the audio waveform as a continuous line graph.
+ */
+const ECGVisualizer = ({
+  trackRef,
+  className,
+}: {
+  trackRef?: TrackReference;
   className?: string;
-}
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-export function ThemeToggle({ className }: ThemeToggleProps) {
-  const [theme, setTheme] = useState<ThemeMode | undefined>(undefined);
-
-  // 1. Initialize state on mount
   useEffect(() => {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY) as ThemeMode;
-    setTheme(stored ?? 'system');
-  }, []);
+    const canvas = canvasRef.current;
+    // Check if we have a valid track and it has a mediaStreamTrack accessible
+    if (!canvas || !trackRef?.publication?.track) return;
 
-  // 2. Listen for system changes when mode is 'system'
-  useEffect(() => {
-    if (theme !== 'system') return;
+    const track = trackRef.publication.track;
+    if (!track.mediaStreamTrack) return;
 
-    const mediaQuery = window.matchMedia(THEME_MEDIA_QUERY);
-    
-    const handleChange = () => {
-      const doc = document.documentElement;
-      doc.classList.remove('light', 'dark');
-      doc.classList.add(mediaQuery.matches ? 'dark' : 'light');
+    // 1. Setup Web Audio API
+    const stream = new MediaStream([track.mediaStreamTrack]);
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const audioContext = new AudioContextClass();
+    const analyser = audioContext.createAnalyser();
+    const source = audioContext.createMediaStreamSource(stream);
+
+    // 2. Config Analyser
+    analyser.fftSize = 2048; // Higher resolution for smoother line
+    source.connect(analyser);
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    let animationId: number;
+
+    // 3. Draw Loop
+    const draw = () => {
+      animationId = requestAnimationFrame(draw);
+
+      analyser.getByteTimeDomainData(dataArray);
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const width = canvas.width;
+      const height = canvas.height;
+
+      // Clear canvas
+      ctx.clearRect(0, 0, width, height);
+
+      // Draw Grid (Optional, subtle background)
+      ctx.lineWidth = 1;
+      
+      // Draw Waveform
+      ctx.lineWidth = 2; // Thinner for precise medical look
+      ctx.strokeStyle = '#10b981'; // Emerald-500
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = '#10b981'; // Glow effect
+
+      ctx.beginPath();
+
+      const sliceWidth = (width * 1.0) / bufferLength;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0; // Normalizes to 0-2 (1 is center)
+        const y = (v * height) / 2;
+
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+
+        x += sliceWidth;
+      }
+
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
     };
 
-    // Apply immediately in case system state drifted while tab was hidden
-    handleChange();
+    draw();
 
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [theme]);
+    return () => {
+      cancelAnimationFrame(animationId);
+      source.disconnect();
+      analyser.disconnect();
+      audioContext.close();
+    };
+  }, [trackRef]);
 
-  const updateTheme = (newTheme: ThemeMode) => {
-    const doc = document.documentElement;
-    
-    // Save preference
-    localStorage.setItem(THEME_STORAGE_KEY, newTheme);
-    setTheme(newTheme);
+  return <canvas ref={canvasRef} className={className} width={300} height={150} />;
+};
 
-    // Apply classes
-    doc.classList.remove('light', 'dark');
-
-    if (newTheme === 'system') {
-      const systemTheme = window.matchMedia(THEME_MEDIA_QUERY).matches ? 'dark' : 'light';
-      doc.classList.add(systemTheme);
-    } else {
-      doc.classList.add(newTheme);
-    }
-  };
-
-  // Prevent hydration mismatch by rendering a placeholder until mounted
-  if (!theme) return <div className={cn("h-9 w-24 rounded-full bg-muted/20", className)} />;
-
-  return (
-    <div
-      className={cn(
-        'group relative flex items-center justify-center rounded-full bg-neutral-100 p-1 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800',
-        className
-      )}
-      role="radiogroup"
-      aria-label="Theme toggle"
-    >
-      <ThemeButton
-        mode="light"
-        current={theme}
-        onClick={() => updateTheme('light')}
-        icon={<Sun weight={theme === 'light' ? 'fill' : 'bold'} />}
-        label="Light"
-      />
-      <ThemeButton
-        mode="system"
-        current={theme}
-        onClick={() => updateTheme('system')}
-        icon={<Monitor weight={theme === 'system' ? 'fill' : 'bold'} />}
-        label="System"
-      />
-      <ThemeButton
-        mode="dark"
-        current={theme}
-        onClick={() => updateTheme('dark')}
-        icon={<Moon weight={theme === 'dark' ? 'fill' : 'bold'} />}
-        label="Dark"
-      />
-    </div>
-  );
+interface TileLayoutProps {
+  chatOpen: boolean;
 }
 
-// Sub-component for cleaner render logic
-function ThemeButton({
-  mode,
-  current,
-  onClick,
-  icon,
-  label
-}: {
-  mode: ThemeMode;
-  current: ThemeMode;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  const isActive = current === mode;
+export function TileLayout({ chatOpen }: TileLayoutProps) {
+  const {
+    state: agentState,
+    audioTrack: agentAudioTrack,
+    videoTrack: agentVideoTrack,
+  } = useVoiceAssistant();
+  const [screenShareTrack] = useTracks([Track.Source.ScreenShare]);
+  const cameraTrack: TrackReference | undefined = useLocalTrackRef(Track.Source.Camera);
+
+  const isCameraEnabled = cameraTrack && !cameraTrack.publication.isMuted;
+  const isScreenShareEnabled = screenShareTrack && !screenShareTrack.publication.isMuted;
+  const hasSecondTile = isCameraEnabled || isScreenShareEnabled;
+
+  const animationDelay = chatOpen ? 0 : 0.15;
+  const isAvatar = agentVideoTrack !== undefined;
+  const videoWidth = agentVideoTrack?.publication.dimensions?.width ?? 0;
+  const videoHeight = agentVideoTrack?.publication.dimensions?.height ?? 0;
 
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={isActive}
-      aria-label={`Switch to ${label} theme`}
-      onClick={onClick}
-      className={cn(
-        'relative flex h-7 w-7 items-center justify-center rounded-full text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500',
-        isActive 
-          ? 'bg-white text-neutral-950 shadow-sm dark:bg-neutral-800 dark:text-neutral-50 hover:bg-neutral-50 dark:hover:bg-neutral-700' 
-          : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/50'
-      )}
-    >
-      <span className="z-10 text-base">{icon}</span>
-    </button>
+    <div className="pointer-events-none fixed inset-x-0 top-8 bottom-32 z-50 md:top-12 md:bottom-40">
+      <div className="relative mx-auto h-full max-w-4xl px-4 md:px-0">
+        <div className={cn(classNames.grid)}>
+          {/* Agent */}
+          <div
+            className={cn([
+              'grid transition-all duration-500 ease-spring',
+              !chatOpen && classNames.agentChatClosed,
+              chatOpen && hasSecondTile && classNames.agentChatOpenWithSecondTile,
+              chatOpen && !hasSecondTile && classNames.agentChatOpenWithoutSecondTile,
+            ])}
+          >
+            <AnimatePresence mode="popLayout">
+              {!isAvatar && (
+                // Audio Agent
+                <MotionContainer
+                  key="agent"
+                  layoutId="agent"
+                  initial={{ opacity: 0, scale: 0.8, filter: 'blur(10px)' }}
+                  animate={{ opacity: 1, scale: chatOpen ? 1 : 1.2, filter: 'blur(0px)' }}
+                  transition={{ ...ANIMATION_TRANSITION, delay: animationDelay }}
+                  className={cn(
+                    'relative overflow-hidden',
+                    // ECG Style: Dark background, thin sharp border
+                    'bg-black/95 backdrop-blur-md',
+                    'border border-emerald-500/30',
+                    'shadow-[0_0_15px_-3px_rgba(16,185,129,0.2)]', // Emerald glow
+                    chatOpen ? 'h-[60px] w-[60px] rounded-lg' : 'h-[120px] w-[120px] rounded-xl'
+                  )}
+                >
+                  <div className="absolute inset-0 z-0 opacity-20" style={{
+                    backgroundImage: `linear-gradient(rgba(16, 185, 129, 0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(16, 185, 129, 0.3) 1px, transparent 1px)`,
+                    backgroundSize: '10px 10px'
+                  }}></div>
+                  <ECGVisualizer
+                    trackRef={agentAudioTrack}
+                    className="relative z-10 h-full w-full"
+                  />
+                </MotionContainer>
+              )}
+
+              {isAvatar && (
+                // Avatar Agent
+                <MotionContainer
+                  key="avatar"
+                  layoutId="avatar"
+                  initial={{
+                    scale: 1,
+                    opacity: 1,
+                    maskImage: 'radial-gradient(circle, black 0%, transparent 0%)',
+                  }}
+                  animate={{
+                    maskImage: chatOpen
+                      ? 'radial-gradient(circle, black 100%, transparent 100%)'
+                      : 'radial-gradient(circle, black 60%, transparent 70%)',
+                    borderRadius: chatOpen ? 8 : 12,
+                  }}
+                  transition={{
+                    ...ANIMATION_TRANSITION,
+                    delay: animationDelay,
+                    maskImage: { duration: 0.8 },
+                  }}
+                  className={cn(
+                    'relative overflow-hidden bg-black',
+                    'border border-emerald-500/20 shadow-[0_0_15px_-3px_rgba(16,185,129,0.1)]',
+                    chatOpen 
+                      ? 'h-[60px] w-[60px]' 
+                      : 'h-auto w-full max-w-[400px] aspect-video'
+                  )}
+                >
+                  <VideoTrack
+                    width={videoWidth}
+                    height={videoHeight}
+                    trackRef={agentVideoTrack}
+                    className={cn(
+                      'h-full w-full object-cover opacity-90 grayscale-[0.2]',
+                      chatOpen ? 'scale-110' : 'scale-100'
+                    )}
+                  />
+                </MotionContainer>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div
+            className={cn([
+              'grid transition-all duration-500',
+              chatOpen && classNames.secondTileChatOpen,
+              !chatOpen && classNames.secondTileChatClosed,
+            ])}
+          >
+            {/* Camera & Screen Share */}
+            <AnimatePresence>
+              {(cameraTrack && isCameraEnabled || screenShareTrack && isScreenShareEnabled) && (
+                <MotionContainer
+                  key="camera"
+                  layout="position"
+                  layoutId="camera"
+                  initial={{ opacity: 0, scale: 0.8, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, y: 20 }}
+                  transition={{ ...ANIMATION_TRANSITION, delay: animationDelay }}
+                  className={cn(
+                    'relative overflow-hidden',
+                    'shadow-lg shadow-black/40',
+                    'border border-neutral-800 bg-neutral-900',
+                    'h-[60px] w-[60px] rounded-lg'
+                  )}
+                >
+                  <VideoTrack
+                    trackRef={cameraTrack || screenShareTrack}
+                    width={(cameraTrack || screenShareTrack)?.publication.dimensions?.width ?? 0}
+                    height={(cameraTrack || screenShareTrack)?.publication.dimensions?.height ?? 0}
+                    className="h-full w-full object-cover grayscale-[0.1]"
+                  />
+                  {/* Status Indicator */}
+                  <div className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,1)]" />
+                </MotionContainer>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
